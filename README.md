@@ -37,6 +37,7 @@ mvmv [OPTIONS] SOURCE TARGET
 ### Options
 
 - `--workers N, -w N`: Number of parallel workers (default: number of CPU cores)
+- `--buffer N, -b N`: Job queue buffer size (default: 100,000)
 - `--stats, -s`: Show statistics during and after operation
 - `--verbose, -v`: Enable verbose output
 - `--dry-run, -n`: Preview what would be moved without actually moving
@@ -55,21 +56,33 @@ mvmv --workers 32 --stats /data/source/ /data/target/
 # Dry run with verbose output
 mvmv -v -n /data/source/ /data/target/
 
+# Custom buffer size for very large directories
+mvmv --buffer 1000000 /data/source/ /data/target/
+
 # Show statistics during operation
 mvmv --stats /data/source/ /data/target/
 ```
 
 ## Algorithm
 
-1. If target directory doesn't exist, move entire source directory
-2. If target directory exists, recursively check contents
-3. Move files that don't exist in target
-4. Use parallel workers to process multiple items concurrently
+1. Start multiple worker goroutines
+2. Submit the source directory as the initial job
+3. For each job, workers:
+   - Skip if source and target paths are the same
+   - Skip symbolic links
+   - For directories:
+     - If target doesn't exist, move entire directory tree
+     - If target exists, scan contents and create jobs for each entry
+   - For files:
+     - Skip if file exists in target
+     - Move file if it doesn't exist in target
+4. Workers recursively process all jobs until complete
 
 Implementation details:
-- Each worker maintains its own job queue
-- Workers share jobs when queues become unbalanced
-- Uses OS rename operation for atomic moves
+- Workers pull jobs from a shared buffered channel
+- Uses sync.WaitGroup to track job completion
+- Atomic operations for thread-safe statistics
+- OS rename for atomic move operations
 
 ## Error Handling
 
